@@ -1,0 +1,45 @@
+diff --git a/model.py b/model.py
+index fa734c0..1ceb78c 100644
+--- a/model.py
++++ b/model.py
+@@ -1,6 +1,7 @@
+ import math
+ from collections import OrderedDict
+ 
++import numpy as np
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+@@ -286,6 +287,8 @@ if __name__ == '__main__':
+     import argparse
+ 
+     parser = argparse.ArgumentParser(description='DeepSpeech model information')
++    parser.add_argument('--onnx-export', default=None,
++                        help='Path to export ONNX model to')
+     parser.add_argument('--model-path', default='models/deepspeech_final.pth',
+                         help='Path to model file created by training')
+     args = parser.parse_args()
+@@ -322,3 +325,23 @@ if __name__ == '__main__':
+         print("Additional Metadata")
+         for k, v in model._meta:
+             print("  ", k, ": ", v)
++
++    if args.onnx_export:
++        import onnx
++        import caffe2.python.onnx.backend
++        print('Exporting ONNX model to %s' % args.onnx_export)
++        model.eval() # put batchnorm and dropout into evaluation mode
++        x1 = torch.randn(1, 1, 161, 501, requires_grad=True)
++        torch_out = torch.onnx._export(model,              # model being run
++                                       x1,                 # model input (or a tuple for multiple inputs)
++                                       args.onnx_export,   # where to save the model
++                                       export_params=True) # store the trained parameter weights
++
++        # Load the ONNX model and run inference on a new input in both the Caffe2 and PyTorch models
++        onnx_model = onnx.load(args.onnx_export)
++        x2 = torch.randn(1, 1, 161, 501, requires_grad=False)
++        c2_out = caffe2.python.onnx.backend.run_model(onnx_model, x2.numpy())
++        pt_out = model(x2)
++
++        # Verify the numerical correctness upto 3 decimal places
++        np.testing.assert_almost_equal(pt_out.data.cpu().numpy(), c2_out[0], decimal=3)
